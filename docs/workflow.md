@@ -18,7 +18,7 @@ databricks bundle deploy -t dev
 databricks bundle run -t dev pipeline_medallion --params dia_hasta=650
 ```
 
-Antes de la primera corrida, los 7 CSV deben estar subidos al Volume `/Volumes/dunnhumby/bronze/raw_files/`.
+La tarea `ingesta_kaggle` descarga los CSV desde Kaggle, así que no hay que subir nada a mano.
 
 ## Tareas
 
@@ -27,10 +27,11 @@ Cada tarea es un notebook del repositorio y depende de la anterior. `setup_unity
 | # | Tarea | Notebook | Qué hace |
 |---|---|---|---|
 | 0 | `setup_unity_catalog` | `notebooks/00_setup_unity_catalog` | Crea, si no existen, el catálogo, los esquemas y el Volume |
-| 1 | `bronze` | `notebooks/01_bronze` | Carga completa de los 7 CSV del Volume a `dunnhumby.bronze` |
-| 2 | `silver` | `notebooks/02_silver` | Limpieza y `MERGE` incremental por día hacia `dunnhumby.silver` |
-| 3 | `gold` | `notebooks/03_gold` | Tablas de las 4 preguntas de negocio con `MERGE` en `dunnhumby.gold` |
-| 4 | `catalogo_datos` | `notebooks/04_catalogo_datos` | Comentarios de tablas y columnas en Unity Catalog, más una verificación |
+| 1 | `ingesta_kaggle` | `notebooks/00b_ingesta_kaggle` | Descarga los 7 CSV del dataset público de Kaggle al Volume `raw_files` (sin `causal_data`) |
+| 2 | `bronze` | `notebooks/01_bronze` | Carga completa de los 7 CSV del Volume a `dunnhumby.bronze` |
+| 3 | `silver` | `notebooks/02_silver` | Limpieza y `MERGE` incremental por día hacia `dunnhumby.silver` |
+| 4 | `gold` | `notebooks/03_gold` | Tablas de las 4 preguntas de negocio con `MERGE` en `dunnhumby.gold` |
+| 5 | `catalogo_datos` | `notebooks/04_catalogo_datos` | Comentarios de tablas y columnas en Unity Catalog, más una verificación |
 
 Los notebooks `01b_diagnostico_calidad` y `02b_exploracion_gold` son exploratorios y no forman parte del Job.
 
@@ -42,9 +43,11 @@ Están declarados en el bundle como *Job parameters*, y Databricks los pasa a lo
 |---|---|---|
 | `dia_hasta` | `711` | Último día que se procesa. El dataset es estático (días 1 a 711), así que un valor menor simula que los días siguientes aún no llegan |
 | `dias_reproceso` | `0` | Días ya cargados que se vuelven a procesar, por si llegan datos tardíos |
+| `dataset_kaggle` | `frtgnn/dunnhumby-the-complete-journey` | Dataset de Kaggle del que se descargan los CSV |
 
 ## Cómo funciona la carga incremental
 
+- **Ingesta:** cada corrida vuelve a descargar los 7 CSV de [Kaggle](https://www.kaggle.com/datasets/frtgnn/dunnhumby-the-complete-journey). Si Kaggle no responde pero el archivo ya está en el Volume, se usa esa copia (plan B: también se pueden subir a mano desde Catalog Explorer > Volume > Upload).
 - **Bronze** se recarga completa en cada corrida, porque es la copia fiel del archivo de origen, que llega entero.
 - **Silver** calcula una ventana de días: desde el día siguiente al último que ya tiene `transaction_data` (menos `dias_reproceso`) hasta `dia_hasta`. Solo esas filas de `transaction_data`, su cuarentena y `coupon_redempt` pasan por el `MERGE`, con la clave `basket_id` + `product_id` en las transacciones. Las tablas de referencia no tienen día, así que se comparan completas por su clave natural.
 - **Gold:** `ventas_departamento_periodo` recalcula solo los periodos de 4 semanas que recibieron líneas nuevas. Las otras tres tablas se recalculan completas, porque el decil de gasto y las semanas sin comprar dependen de todos los hogares, y luego se hace el `MERGE`.
