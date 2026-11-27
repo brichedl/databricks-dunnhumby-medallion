@@ -1,4 +1,4 @@
-# Workflow del pipeline Medallion: setup -> bronze -> silver -> gold -> catálogo de datos.
+# Workflow del pipeline Medallion: setup -> ingesta Kaggle -> bronze -> silver -> gold -> catálogo de datos.
 # Las tareas no declaran clúster, así que corren en cómputo serverless (el disponible en Free Edition).
 resources:
   jobs:
@@ -14,6 +14,8 @@ resources:
           default: "711"   # último día que se procesa; un valor menor simula que los días siguientes aún no llegan
         - name: dias_reproceso
           default: "0"     # días ya cargados que se vuelven a procesar (datos tardíos)
+        - name: dataset_kaggle
+          default: frtgnn/dunnhumby-the-complete-journey   # dataset público de Kaggle que usa 00b_ingesta_kaggle
 
       # Una sola corrida a la vez: dos MERGE simultáneos sobre las mismas tablas podrían chocar
       max_concurrent_runs: 1
@@ -30,10 +32,17 @@ resources:
           notebook_task:
             notebook_path: ../notebooks/00_setup_unity_catalog.ipynb
 
+        - task_key: ingesta_kaggle
+          description: Descarga desde Kaggle los 7 CSV del proyecto al Volume raw_files
+          depends_on:
+            - task_key: setup_unity_catalog
+          notebook_task:
+            notebook_path: ../notebooks/00b_ingesta_kaggle.ipynb
+
         - task_key: bronze
           description: Carga completa de los 7 CSV del Volume a tablas Delta de bronze
           depends_on:
-            - task_key: setup_unity_catalog
+            - task_key: ingesta_kaggle
           notebook_task:
             notebook_path: ../notebooks/01_bronze.ipynb
 
